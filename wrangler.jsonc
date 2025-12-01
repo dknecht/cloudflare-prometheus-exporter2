@@ -1,0 +1,13 @@
+{
+  "name": "cloudflare-prometheus-exporter",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-01",
+  "vars": {
+    "SCRAPE_DELAY": "60",
+    "CF_BATCH_SIZE": "10",
+    "FREE_TIER": "false",
+    "EXCLUDE_HOST": "true",
+    "CF_QUERY_LIMIT": "1000",
+    "CF_HTTP_STATUS_GROUP": "false"
+  }
+}

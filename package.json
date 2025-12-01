@@ -1,0 +1,21 @@
+{
+  "name": "cloudflare-prometheus-exporter",
+  "version": "1.0.0",
+  "description": "Cloudflare Prometheus Exporter for Cloudflare Workers using Effect",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "prepare": "effect-language-service patch"
+  },
+  "dependencies": {
+    "effect": "^3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "@effect/language-service": "^0",
+    "typescript": "^5",
+    "wrangler": "^3"
+  }
+}

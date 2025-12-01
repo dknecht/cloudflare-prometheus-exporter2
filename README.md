@@ -1,157 +1,220 @@
-# cloudflare
+# Cloudflare Prometheus Exporter
 
+A Cloudflare Prometheus Exporter built with [Effect TypeScript](https://effect.website) for deployment on Cloudflare Workers.
 
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/lablabs/cloudflare-exporter)
 
-## Authentication
-Authentication towards the Cloudflare API can be done in two ways:
+## Features
 
-### API token
-The preferred way of authenticating is with an API token, for which the scope can be configured at the Cloudflare
-dashboard.
+- **50+ Prometheus Metrics** - Comprehensive Cloudflare metrics including HTTP requests, bandwidth, threats, workers, load balancers, and more
+- **Effect TypeScript** - Type-safe, composable error handling with the Effect library
+- **Cloudflare Workers** - Serverless deployment with global edge distribution
+- **Configurable** - Extensive configuration options via environment variables
+- **Metrics Denylist** - Exclude specific metrics from collection
+- **Zone Filtering** - Filter metrics by specific zones or exclude zones
+- **Free Tier Support** - Option to limit metrics to free tier availability
 
-Required authentication scopes:
-- `Analytics:Read` is required for zone-level metrics
-- `Account.Account Analytics:Read` is required for Worker metrics
-- `Account Settings:Read` is required for Worker metrics (for listing accessible accounts, scraping all available
-  Workers included in authentication scope)
-- `Firewall Services:Read` is required to fetch zone rule name for `cloudflare_zone_firewall_events_count` metric
-- `Account. Account Rulesets:Read` is required to fetch account rule name for `cloudflare_zone_firewall_events_count` metric
+## Quick Start
 
-To authenticate this way, only set `CF_API_TOKEN` (omit `CF_API_EMAIL` and `CF_API_KEY`)
+### One-Click Deploy
 
-### User email + API key
-To authenticate with user email + API key, use the `Global API Key` from the Cloudflare dashboard.
-Beware that this key authenticates with write access to every Cloudflare resource.
+Click the deploy button above to deploy directly to Cloudflare Workers. You'll need to configure your Cloudflare API credentials as secrets.
 
-To authenticate this way, set both `CF_API_KEY` and `CF_API_EMAIL`.
+### Manual Deployment
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/lablabs/cloudflare-exporter.git
+   cd cloudflare-exporter
+   ```
+
+2. Install dependencies:
+   ```bash
+   pnpm install
+   ```
+
+3. Configure your API credentials:
+   ```bash
+   cp .dev.vars.example .dev.vars
+   # Edit .dev.vars with your Cloudflare API token
+   ```
+
+4. Deploy:
+   ```bash
+   pnpm deploy
+   ```
 
 ## Configuration
-The exporter can be configured using env variables or command flags.
 
-| **KEY** | **description** |
-|-|-|
+### Environment Variables
 
-| `EXCLUDE_HOST`
-| `CF_API_EMAIL` |  user email (see https://support.cloudflare.com/hc/en-us/articles/200167836-Managing-API-Tokens-and-Keys) |
-| `CF_API_KEY` |  API key associated with email (`CF_API_EMAIL` is required if this is set)|
-| `CF_API_TOKEN` |  API authentication token (recommended before API key + email. Version 0.0.5+. see https://developers.cloudflare.com/analytics/graphql-api/getting-started/authentication/api-token-auth) |
-| `CF_EXCLUDE_ZONES` |  (Optional) cloudflare zones to exclude, comma delimited list of zone ids. If not set, no zones from account are excluded |
-| `FREE_TIER` | (Optional) scrape only metrics included in free plan. Accepts `true` or `false`, default `false`. |
-| `LISTEN` |  listen on addr:port (default `:8080`), omit addr to listen on all interfaces |
-| `METRICS_PATH` |  path for metrics, default `/metrics` |
-| `SCRAPE_DELAY` | scrape delay in seconds, default `300` |
-| `CF_BATCH_SIZE` | cloudflare request zones batch size (1 - 10), default `10` |
-| `METRICS_DENYLIST` | (Optional) cloudflare-exporter metrics to not export, comma delimited list of cloudflare-exporter metrics. If not set, all metrics are exported |
-| `ZONE_<NAME>` |  `DEPRECATED since 0.0.5` (optional) Zone ID. Add zones you want to scrape by adding env vars in this format. You can find the zone ids in Cloudflare dashboards. |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CF_API_TOKEN` | Cloudflare API Token (recommended) | - |
+| `CF_API_KEY` | Cloudflare API Key (legacy) | - |
+| `CF_API_EMAIL` | Cloudflare API Email (required with API Key) | - |
+| `SCRAPE_DELAY` | Delay in seconds before fetching metrics | `60` |
+| `CF_QUERY_LIMIT` | Maximum results per GraphQL query | `1000` |
+| `CF_BATCH_SIZE` | Number of zones to process per batch | `10` |
+| `FREE_TIER` | Only collect free tier metrics | `false` |
+| `EXCLUDE_HOST` | Exclude host labels from metrics | `true` |
+| `CF_HTTP_STATUS_GROUP` | Group HTTP status codes (2xx, 4xx, etc.) | `false` |
+| `METRICS_DENYLIST` | Comma-separated list of metrics to exclude | - |
+| `CF_ZONES` | Comma-separated list of zone IDs to include | - |
+| `CF_EXCLUDE_ZONES` | Comma-separated list of zone IDs to exclude | - |
 
+### Setting Secrets
 
-Corresponding flags:
-```
-  -cf_api_email="": cloudflare api email, works with api_key flag
-  -cf_api_key="": cloudflare api key, works with api_email flag
-  -cf_api_token="": cloudflare api token (version 0.0.5+, preferred)
-  -cf_zones="": cloudflare zones to export, comma delimited list
-  -cf_exclude_zones="": cloudflare zones to exclude, comma delimited list
-  -free_tier=false: scrape only metrics included in free plan, default false
-  -listen=":8080": listen on addr:port ( default :8080), omit addr to listen on all interfaces
-  -metrics_path="/metrics": path for metrics, default /metrics
-  -scrape_delay=300: scrape delay in seconds, defaults to 300
-  -cf_batch_size=10: cloudflare zones batch size (1-10)
-  -metrics_denylist="": cloudflare-exporter metrics to not export, comma delimited list
+For deployment, set your API token as a secret:
+
+```bash
+wrangler secret put CF_API_TOKEN
 ```
 
-Note: `ZONE_<name>` configuration is not supported as flag.
+### API Token Permissions
 
-## List of available metrics
+Create an API token with the following permissions:
+
+**Required:**
+- Zone > Analytics > Read
+- Account > Account Analytics > Read
+- Account > Workers Scripts > Read
+
+**Optional (for additional metrics):**
+- Zone > SSL and Certificates > Read
+- Zone > Firewall Services > Read
+- Zone > Load Balancers > Read
+- Account > Magic Transit > Read
+- Account > Logpush > Read
+
+## Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/` | Landing page |
+| `/metrics` | Prometheus metrics endpoint |
+| `/health` | Health check endpoint |
+
+## Available Metrics
+
+### Zone Metrics
+- `cloudflare_zone_requests_total` - Total requests per zone
+- `cloudflare_zone_requests_cached` - Cached requests per zone
+- `cloudflare_zone_requests_ssl_encrypted` - SSL encrypted requests
+- `cloudflare_zone_requests_content_type` - Requests by content type
+- `cloudflare_zone_requests_country` - Requests by country
+- `cloudflare_zone_requests_status` - Requests by HTTP status
+- `cloudflare_zone_requests_browser_map_page_views_count` - Page views by browser
+- `cloudflare_zone_requests_origin_status_country_host` - Requests by origin status, country, host
+- `cloudflare_zone_requests_status_country_host` - Requests by edge status, country, host
+- `cloudflare_zone_request_method_count` - Requests by HTTP method
+- `cloudflare_zone_bandwidth_total` - Total bandwidth in bytes
+- `cloudflare_zone_bandwidth_cached` - Cached bandwidth
+- `cloudflare_zone_bandwidth_ssl_encrypted` - SSL encrypted bandwidth
+- `cloudflare_zone_bandwidth_content_type` - Bandwidth by content type
+- `cloudflare_zone_bandwidth_country` - Bandwidth by country
+- `cloudflare_zone_threats_total` - Total threats
+- `cloudflare_zone_threats_country` - Threats by country
+- `cloudflare_zone_threats_type` - Threats by type
+- `cloudflare_zone_pageviews_total` - Total page views
+- `cloudflare_zone_uniques_total` - Unique visitors
+- `cloudflare_zone_cache_hit_ratio` - Cache hit ratio
+
+### Colocation Metrics
+- `cloudflare_zone_colocation_visits` - Visits per colocation
+- `cloudflare_zone_colocation_edge_response_bytes` - Edge response bytes per colocation
+- `cloudflare_zone_colocation_requests_total` - Requests per colocation
+
+### Error Rate Metrics
+- `cloudflare_zone_customer_error_4xx_rate` - 4xx error rate
+- `cloudflare_zone_customer_error_5xx_rate` - 5xx error rate
+- `cloudflare_zone_edge_error_rate` - Edge error rate
+- `cloudflare_zone_origin_error_rate` - Origin error rate
+- `cloudflare_zone_origin_response_duration_ms` - Origin response duration
+
+### Worker Metrics
+- `cloudflare_worker_requests_count` - Worker requests
+- `cloudflare_worker_errors_count` - Worker errors
+- `cloudflare_worker_cpu_time` - CPU time quantiles (P50, P75, P99, P999)
+- `cloudflare_worker_duration` - Duration quantiles (P50, P75, P99, P999)
+
+### Load Balancer Metrics
+- `cloudflare_zone_pool_health_status` - Pool health status (1=healthy, 0=unhealthy)
+- `cloudflare_zone_pool_requests_total` - Pool requests
+
+### Health Check Metrics
+- `cloudflare_zone_health_check_events_origin_count` - Health check events per origin
+- `cloudflare_zone_health_check_events_avg` - Average health check events
+
+### Firewall Metrics
+- `cloudflare_zone_firewall_events_count` - Firewall events
+- `cloudflare_zone_firewall_request_action` - Firewall actions
+- `cloudflare_zone_firewall_bots_detected` - Bots detected
+- `cloudflare_zone_bot_request_by_country` - Bot requests by country
+
+### Logpush Metrics
+- `cloudflare_logpush_failed_jobs_account_count` - Failed logpush jobs (account level)
+- `cloudflare_logpush_failed_jobs_zone_count` - Failed logpush jobs (zone level)
+
+### Magic Transit Metrics
+- `cloudflare_magic_transit_active_tunnels` - Active tunnels
+- `cloudflare_magic_transit_healthy_tunnels` - Healthy tunnels
+- `cloudflare_magic_transit_tunnel_failures` - Tunnel failures
+- `cloudflare_magic_transit_edge_colo_count` - Edge colocation sites
+
+### SSL Certificate Metrics
+- `cloudflare_zone_certificate_validation_status` - Certificate expiry timestamp
+
+### Exporter Metrics
+- `cloudflare_exporter_up` - Exporter health status
+- `cloudflare_zones_total` - Total zones
+- `cloudflare_zones_filtered` - Zones after filtering
+- `cloudflare_zones_processed` - Zones processed
+
+## Prometheus Configuration
+
+Add the following to your Prometheus configuration:
+
+```yaml
+scrape_configs:
+  - job_name: 'cloudflare'
+    scrape_interval: 5m
+    scrape_timeout: 2m
+    static_configs:
+      - targets: ['your-worker.your-subdomain.workers.dev']
 ```
-"cloudflare_zone_requests_total"
-"cloudflare_zone_requests_cached"
-"cloudflare_zone_requests_ssl_encrypted"
-"cloudflare_zone_requests_content_type"
-"cloudflare_zone_requests_country"
-"cloudflare_zone_requests_status"
-"cloudflare_zone_requests_browser_map_page_views_count"
-"cloudflare_zone_requests_origin_status_country_host"
-"cloudflare_zone_requests_status_country_host"
-"cloudflare_zone_bandwidth_total"
-"cloudflare_zone_bandwidth_cached"
-"cloudflare_zone_bandwidth_ssl_encrypted"
-"cloudflare_zone_bandwidth_content_type"
-"cloudflare_zone_bandwidth_country"
-"cloudflare_zone_threats_total"
-"cloudflare_zone_threats_country"
-"cloudflare_zone_threats_type"
-"cloudflare_zone_pageviews_total"
-"cloudflare_zone_uniques_total"
-"cloudflare_zone_colocation_visits"
-"cloudflare_zone_colocation_edge_response_bytes"
-"cloudflare_zone_colocation_requests_total"
-"cloudflare_zone_firewall_events_count"
-"cloudflare_zone_health_check_events_origin_count"
-"cloudflare_worker_requests_count"
-"cloudflare_worker_errors_count"
-"cloudflare_worker_cpu_time"
-"cloudflare_worker_duration"
-"cloudflare_zone_pool_health_status"
-"cloudflare_zone_pool_requests_total"
-"cloudflare_logpush_failed_jobs_account_count"
-"cloudflare_logpush_failed_jobs_zone_count"
-Newly added_______________________________________________
-"cloudflare_zone_customer_error_4xx_rate"
-"cloudflare_zone_customer_error_5xx_rate"
-"cloudflare_zone_edge_error_rate"
-"cloudflare_zone_origin_error_rate"
-"cloudflare_zone_bot_request_by_country"
-"cloudflare_zone_cache_hit_ratio"
-"cloudflare_zone_health_check_events_avg"
-"cloudflare_zone_firewall_bots_detected"
-"cloudflare_zone_firewall_request_action"
-"cloudflare_zone_request_method_count"
-"cloudflare_magic_transit_active_tunnels"
-"cloudflare_magic_transit_healthy_tunnels"
-"cloudflare_magic_transit_tunnel_failures"
-"cloudflare_magic_transit_edge_colo_count"
-"cloudflare_zone_certificate_validation_status"
-"cloudflare_zone_origin_response_duration_ms"
-"cloudflare_zone_colocation_visits_error"              
-"cloudflare_zone_colocation_edge_response_bytes_error" 
-"cloudflare_zone_colocation_requests_total_error"      
 
-Docker file
+## Development
 
-download the file 
-go to the file path where the cloudflare-exporter.tar
+```bash
+# Install dependencies
+pnpm install
 
-```
-docker load -i cloudflare-exporter.tar
+# Run locally
+pnpm dev
+
+# Type check
+pnpm typecheck
+
+# Deploy
+pnpm deploy
 ```
 
-### Run
+## Architecture
 
-API token:
-```
-docker run -d -p 8080:8080 --name cloudflare-exporter -e CF_API_TOKEN=${CF_API_TOKEN} cloudflare-exporter
-```
+This exporter is built using:
 
+- **[Effect](https://effect.website)** - Type-safe functional programming library for TypeScript
+- **Cloudflare Workers** - Serverless edge computing platform
+- **Cloudflare GraphQL Analytics API** - For fetching metrics data
+- **Cloudflare REST API** - For zones, accounts, and SSL certificates
 
-Authenticating with email + API key:
-```
-docker run --rm -p 8080:8080 --name cloudflare-exporter CF_API_KEY=${CF_API_KEY} -e CF_API_EMAIL=${CF_API_EMAIL} cloudflare-exporter
-```
+The Effect library provides:
+- Type-safe error handling with tagged errors
+- Dependency injection via services and layers
+- Composable effects with automatic resource management
+- Concurrent execution of API calls
 
+## License
 
-Configure zones and listening port:
-```
-docker run --rm -p 8080:8081 --name cloudflare-exporter CF_API_TOKEN=${CF_API_TOKEN} -e CF_ZONES=zoneid1,zoneid2,zoneid3 cloudflare-exporter
-```
-
-http status grouping - cloudflare_zone_requests_status - bool [false by default. true when groupig needed]
-docker run --rm -p 8080:8080 --name cloudflare-exporter   -e CF_API_TOKEN=${CF_API_TOKEN} -e CF_HTTP_STATUS_GROUP=bool cloudflare-exporter
-
-
-## Contributing and reporting issues
-Feel free to create an issue in this repository if you have questions, suggestions or feature requests.
-
-
-
-
+MIT
