@@ -6,9 +6,12 @@ import { Context, Effect, Layer } from "effect"
 import { CloudflareClient, CloudflareApiError, GraphQLError } from "./CloudflareClient"
 import { PrometheusRegistry, METRICS } from "./PrometheusRegistry"
 import { ExporterConfig } from "./Config"
-import type { Zone, Account } from "./Types"
+import type { Zone, Account, FirewallRulesResponse } from "./Types"
 
 const FREE_TIER_PLAN_ID = "0feeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+// Type for firewall rules map
+type FirewallRulesMap = Map<string, string>
 
 // Service interface
 export class MetricsCollector extends Context.Tag("MetricsCollector")<
@@ -33,6 +36,28 @@ const findZoneInfo = (
     name: zone.name,
     account: normalizeAccountName(zone.account.name),
   }
+}
+
+// Helper to build firewall rules map from response
+const buildFirewallRulesMap = (response: FirewallRulesResponse): FirewallRulesMap => {
+  const map: FirewallRulesMap = new Map()
+
+  // Add traditional firewall rules
+  for (const rule of response.result) {
+    if (rule.description) {
+      map.set(rule.id, rule.description)
+    }
+  }
+
+  // Add managed rulesets
+  if (response.rulesets) {
+    for (const ruleset of response.rulesets) {
+      const desc = ruleset.description ?? ruleset.name
+      map.set(ruleset.id, desc)
+    }
+  }
+
+  return map
 }
 
 // Implementation
@@ -73,10 +98,38 @@ export const MetricsCollectorLive = Layer.effect(
       return { ...base, host }
     }
 
+    // Fetch firewall rules for zones and build a combined map
+    const fetchFirewallRulesForZones = (zoneIDs: readonly string[]) =>
+      Effect.gen(function* () {
+        const allRules: FirewallRulesMap = new Map()
+
+        // Fetch rules for each zone concurrently
+        const results = yield* Effect.all(
+          zoneIDs.map((zoneID) =>
+            client.fetchFirewallRules(zoneID).pipe(
+              Effect.map((response) => ({ zoneID, response })),
+              Effect.catchAll(() => Effect.succeed({ zoneID, response: { result: [], rulesets: [] } }))
+            )
+          ),
+          { concurrency: config.sslConcurrency }
+        )
+
+        // Combine all rules into a single map
+        for (const { response } of results) {
+          const zoneRules = buildFirewallRulesMap(response)
+          for (const [id, desc] of zoneRules) {
+            allRules.set(id, desc)
+          }
+        }
+
+        return allRules
+      })
+
     // Collect HTTP metrics for zones
     const collectHTTPMetrics = (
       zoneIDs: readonly string[],
-      zones: readonly Zone[]
+      zones: readonly Zone[],
+      firewallRules: FirewallRulesMap
     ) =>
       Effect.gen(function* () {
         const httpData = yield* client.fetchHTTPMetrics(zoneIDs)
@@ -182,17 +235,27 @@ export const MetricsCollectorLive = Layer.effect(
 
           // Firewall events
           for (const fw of zone.firewallEventsAdaptiveGroups) {
+            // Look up rule description from firewall rules map
+            const ruleDesc = firewallRules.get(fw.dimensions.ruleId) ?? fw.dimensions.ruleId
+
             yield* registry.counter(METRICS.ZONE_FIREWALL_EVENTS_COUNT.name, METRICS.ZONE_FIREWALL_EVENTS_COUNT.help, baseLabels, fw.count)
             yield* registry.counter(
               METRICS.ZONE_FIREWALL_REQUEST_ACTION.name,
               METRICS.ZONE_FIREWALL_REQUEST_ACTION.help,
-              { ...baseLabels, action: fw.dimensions.action },
+              { ...baseLabels, action: fw.dimensions.action, rule: ruleDesc },
               fw.count
             )
             yield* registry.counter(
               METRICS.ZONE_BOT_REQUEST_BY_COUNTRY.name,
               METRICS.ZONE_BOT_REQUEST_BY_COUNTRY.help,
               getLabels({ ...baseLabels, country: fw.dimensions.clientCountryName, action: fw.dimensions.action }, fw.dimensions.clientRequestHTTPHost),
+              fw.count
+            )
+            // Bot detection metrics - track by source (bot_management, user_agent, etc.)
+            yield* registry.counter(
+              METRICS.ZONE_FIREWALL_BOTS_DETECTED.name,
+              METRICS.ZONE_FIREWALL_BOTS_DETECTED.help,
+              getLabels({ ...baseLabels, source: fw.dimensions.source, action: fw.dimensions.action }, fw.dimensions.clientRequestHTTPHost),
               fw.count
             )
           }
@@ -629,12 +692,15 @@ export const MetricsCollectorLive = Layer.effect(
           yield* registry.gauge(METRICS.ZONES_PROCESSED.name, METRICS.ZONES_PROCESSED.help, {}, zoneIDs.length)
 
           if (zoneIDs.length > 0) {
+            // Fetch firewall rules for all zones (used for metric labels)
+            const firewallRules = yield* fetchFirewallRulesForZones(zoneIDs)
+
             // Process zones in batches
             for (let i = 0; i < zoneIDs.length; i += config.batchSize) {
               const batchIDs = zoneIDs.slice(i, i + config.batchSize)
 
               yield* Effect.all([
-                collectHTTPMetrics(batchIDs, nonFreeZones),
+                collectHTTPMetrics(batchIDs, nonFreeZones, firewallRules),
                 collectHealthCheckMetrics(batchIDs, nonFreeZones),
                 collectAdaptiveMetrics(batchIDs, nonFreeZones),
                 collectEdgeCountryMetrics(batchIDs, nonFreeZones),

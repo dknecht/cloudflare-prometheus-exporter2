@@ -28,11 +28,6 @@ import { ExporterConfig } from "./Config"
 
 const CF_GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql/"
 
-// Rate limit: 1200 requests per 5 minutes = 4 requests per second
-// We use 3 RPS to be safe with burst handling
-const RATE_LIMIT_RPS = 3
-const RATE_LIMIT_INTERVAL_MS = 1000 / RATE_LIMIT_RPS
-
 // Error types
 export class CloudflareApiError extends Data.TaggedError("CloudflareApiError")<{
   readonly message: string
@@ -128,13 +123,14 @@ export const CloudflareClientLive = Layer.effect(
 
     // Rate limiter state: track last request time
     const lastRequestTime = yield* Ref.make(0)
+    const rateLimitIntervalMs = 1000 / config.rateLimitRps
 
     // Rate limit helper - ensures minimum interval between requests
     const rateLimit = Effect.gen(function* () {
       const now = Date.now()
       const last = yield* Ref.get(lastRequestTime)
       const elapsed = now - last
-      const waitTime = Math.max(0, RATE_LIMIT_INTERVAL_MS - elapsed)
+      const waitTime = Math.max(0, rateLimitIntervalMs - elapsed)
 
       if (waitTime > 0) {
         yield* Effect.sleep(`${waitTime} millis`)
@@ -161,8 +157,8 @@ export const CloudflareClientLive = Layer.effect(
       now.setSeconds(0, 0)
       now.setTime(now.getTime() - config.scrapeDelay * 1000)
       const maxtime = now.toISOString()
-      // 5 minute window for more data
-      now.setTime(now.getTime() - 5 * 60 * 1000)
+      // Use configurable time window (default 60 seconds)
+      now.setTime(now.getTime() - config.timeWindow * 1000)
       const mintime = now.toISOString()
       return { mintime, maxtime }
     }

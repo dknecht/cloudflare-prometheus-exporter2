@@ -14,6 +14,7 @@ interface Env {
   readonly CF_API_KEY?: string
   readonly CF_API_EMAIL?: string
   readonly SCRAPE_DELAY?: string
+  readonly TIME_WINDOW?: string
   readonly CF_QUERY_LIMIT?: string
   readonly CF_BATCH_SIZE?: string
   readonly FREE_TIER?: string
@@ -24,6 +25,7 @@ interface Env {
   readonly CF_EXCLUDE_ZONES?: string
   readonly METRICS_PATH?: string
   readonly SSL_CONCURRENCY?: string
+  readonly RATE_LIMIT_RPS?: string
 }
 
 // Create the full application layer

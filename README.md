@@ -54,6 +54,7 @@ Click the deploy button above to deploy directly to Cloudflare Workers. You'll n
 | `CF_API_KEY` | Cloudflare API Key (legacy) | - |
 | `CF_API_EMAIL` | Cloudflare API Email (required with API Key) | - |
 | `SCRAPE_DELAY` | Delay in seconds before fetching metrics | `300` |
+| `TIME_WINDOW` | Time window in seconds for metrics queries | `60` |
 | `CF_QUERY_LIMIT` | Maximum results per GraphQL query | `1000` |
 | `CF_BATCH_SIZE` | Number of zones to process per batch | `10` |
 | `FREE_TIER` | Only collect free tier metrics | `false` |
@@ -64,6 +65,7 @@ Click the deploy button above to deploy directly to Cloudflare Workers. You'll n
 | `CF_EXCLUDE_ZONES` | Comma-separated list of zone IDs to exclude | - |
 | `METRICS_PATH` | Custom path for metrics endpoint | `/metrics` |
 | `SSL_CONCURRENCY` | Concurrent SSL certificate fetches | `5` |
+| `RATE_LIMIT_RPS` | API rate limit (requests per second) | `4` |
 
 ### Setting Secrets
 
@@ -73,21 +75,43 @@ For deployment, set your API token as a secret:
 wrangler secret put CF_API_TOKEN
 ```
 
-### API Token Permissions
+### Creating an API Token
 
-Create an API token with the following permissions:
+#### Quick Setup
+
+Click the link below to create a token with the required permissions pre-filled:
+
+**[Create Cloudflare Exporter Token](https://dash.cloudflare.com/profile/api-tokens?permissionGroupKeys=%5B%7B%22key%22%3A%22zone_analytics%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22account_analytics%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22workers_scripts%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22ssl_certificates%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22firewall_services%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22load_balancers%22%2C%22type%22%3A%22read%22%7D%2C%7B%22key%22%3A%22logpush%22%2C%22type%22%3A%22read%22%7D%5D&name=Cloudflare%20Prometheus%20Exporter)**
+
+#### Manual Setup
+
+1. Go to [Cloudflare API Tokens](https://dash.cloudflare.com/profile/api-tokens)
+2. Click "Create Token"
+3. Select "Create Custom Token"
+4. Add the following permissions:
 
 **Required:**
-- Zone > Analytics > Read
-- Account > Account Analytics > Read
-- Account > Workers Scripts > Read
+| Permission | Access |
+|------------|--------|
+| Zone > Analytics | Read |
+| Account > Account Analytics | Read |
+| Account > Workers Scripts | Read |
 
 **Optional (for additional metrics):**
-- Zone > SSL and Certificates > Read
-- Zone > Firewall Services > Read
-- Zone > Load Balancers > Read
-- Account > Magic Transit > Read
-- Account > Logpush > Read
+| Permission | Access | Metrics |
+|------------|--------|---------|
+| Zone > SSL and Certificates | Read | Certificate expiry |
+| Zone > Firewall Services | Read | Firewall rules labels |
+| Zone > Load Balancers | Read | Load balancer health |
+| Account > Magic Transit | Read | Magic Transit tunnels |
+| Account > Logpush | Read | Logpush job status |
+
+5. Set Zone/Account Resources:
+   - **All zones** - or select specific zones
+   - **All accounts** - or select specific accounts
+
+6. Click "Continue to summary" → "Create Token"
+7. Copy the token and store it securely
 
 ## Endpoints
 
