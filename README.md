@@ -66,6 +66,7 @@ Click the deploy button above to deploy directly to Cloudflare Workers. You'll n
 | `METRICS_PATH` | Custom path for metrics endpoint | `/metrics` |
 | `SSL_CONCURRENCY` | Concurrent SSL certificate fetches | `5` |
 | `RATE_LIMIT_RPS` | API rate limit (requests per second) | `4` |
+| `DO_ALARM_INTERVAL` | Durable Object alarm interval in seconds | `60` |
 
 ### Setting Secrets
 
@@ -235,8 +236,25 @@ This exporter is built using:
 
 - **[Effect](https://effect.website)** - Type-safe functional programming library for TypeScript
 - **Cloudflare Workers** - Serverless edge computing platform
+- **Cloudflare Durable Objects** - Stateful storage for counter accumulation
 - **Cloudflare GraphQL Analytics API** - For fetching metrics data
 - **Cloudflare REST API** - For zones, accounts, and SSL certificates
+
+### Durable Objects for Stateful Metrics
+
+The exporter uses Cloudflare Durable Objects to maintain state for proper Prometheus counter semantics. Unlike gauges which represent point-in-time values, counters must monotonically increase and accumulate values over time.
+
+**How it works:**
+1. A single Durable Object instance runs per account
+2. An alarm triggers every 60 seconds (configurable via `DO_ALARM_INTERVAL`) to fetch fresh data from Cloudflare APIs
+3. Counter metrics track `{prev, accumulated}` values to compute deltas and accumulate them over time
+4. Gauge metrics simply store the latest value
+5. When Prometheus scrapes `/metrics`, the cached accumulated values are returned immediately
+
+**Important tradeoffs:**
+- **Staleness**: Metrics may be up to 60 seconds stale (or whatever `DO_ALARM_INTERVAL` is set to). The scrape response includes a staleness comment showing how old the data is.
+- **Counter resets**: If a counter's raw value decreases (e.g., zone was removed and re-added), the exporter treats the new value as a delta addition to handle resets gracefully.
+- **Fast scrapes**: Since data is pre-fetched, `/metrics` requests return immediately without waiting for API calls.
 
 The Effect library provides:
 - Type-safe error handling with tagged errors

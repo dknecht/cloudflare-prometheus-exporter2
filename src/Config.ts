@@ -23,6 +23,7 @@ export class ExporterConfig extends Context.Tag("ExporterConfig")<
     readonly metricsPath: string
     readonly sslConcurrency: number
     readonly rateLimitRps: number
+    readonly doAlarmInterval: number
   }
 >() {}
 
@@ -52,6 +53,7 @@ const config = Config.all({
   metricsPath: Config.string("METRICS_PATH").pipe(Config.withDefault("/metrics")),
   sslConcurrency: Config.integer("SSL_CONCURRENCY").pipe(Config.withDefault(5)),
   rateLimitRps: Config.integer("RATE_LIMIT_RPS").pipe(Config.withDefault(4)),
+  doAlarmInterval: Config.integer("DO_ALARM_INTERVAL").pipe(Config.withDefault(60)),
 })
 
 export const ExporterConfigLive = Layer.effect(
@@ -75,6 +77,7 @@ export const ExporterConfigLive = Layer.effect(
       metricsPath: cfg.metricsPath,
       sslConcurrency: cfg.sslConcurrency,
       rateLimitRps: cfg.rateLimitRps,
+      doAlarmInterval: cfg.doAlarmInterval,
     }
   })
 )
@@ -102,4 +105,5 @@ export const makeConfigFromEnv = (env: Record<string, string | undefined>) =>
     metricsPath: env["METRICS_PATH"] ?? "/metrics",
     sslConcurrency: parseInt(env["SSL_CONCURRENCY"] ?? "5", 10),
     rateLimitRps: parseInt(env["RATE_LIMIT_RPS"] ?? "4", 10),
+    doAlarmInterval: parseInt(env["DO_ALARM_INTERVAL"] ?? "60", 10),
   })

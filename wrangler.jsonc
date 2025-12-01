@@ -8,6 +8,21 @@
     "FREE_TIER": "false",
     "EXCLUDE_HOST": "true",
     "CF_QUERY_LIMIT": "1000",
-    "CF_HTTP_STATUS_GROUP": "false"
-  }
+    "CF_HTTP_STATUS_GROUP": "false",
+    "DO_ALARM_INTERVAL": "60"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "METRICS_COLLECTOR",
+        "class_name": "MetricsCollectorDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["MetricsCollectorDO"]
+    }
+  ]
 }

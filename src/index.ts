@@ -1,12 +1,12 @@
 /**
  * Cloudflare Prometheus Exporter Worker
  * Main entry point for the Cloudflare Worker using Effect
+ * Uses Durable Objects for stateful metric collection
  */
-import { Effect, Layer, Exit } from "effect"
-import { makeConfigFromEnv } from "./Config"
-import { CloudflareClientLive } from "./CloudflareClient"
-import { PrometheusRegistryLive } from "./PrometheusRegistry"
-import { MetricsCollector, MetricsCollectorLive } from "./MetricsCollector"
+import { MetricsCollectorDO } from "./MetricsCollectorDO"
+
+// Re-export the Durable Object class for Cloudflare Workers
+export { MetricsCollectorDO }
 
 // Environment bindings type
 interface Env {
@@ -26,47 +26,25 @@ interface Env {
   readonly METRICS_PATH?: string
   readonly SSL_CONCURRENCY?: string
   readonly RATE_LIMIT_RPS?: string
+  readonly DO_ALARM_INTERVAL?: string
+  readonly METRICS_COLLECTOR: DurableObjectNamespace<MetricsCollectorDO>
 }
 
-// Create the full application layer
-const makeAppLayer = (env: Env) => {
-  const configLayer = makeConfigFromEnv(env as Record<string, string | undefined>)
-  const clientLayer = CloudflareClientLive.pipe(Layer.provide(configLayer))
-  const registryLayer = PrometheusRegistryLive.pipe(Layer.provide(configLayer))
-  const collectorLayer = MetricsCollectorLive.pipe(
-    Layer.provide(clientLayer),
-    Layer.provide(registryLayer),
-    Layer.provide(configLayer)
-  )
-  return collectorLayer
-}
+// Handle /metrics endpoint via Durable Object
+const handleMetrics = async (env: Env): Promise<Response> => {
+  // Use a fixed ID for single DO per account architecture
+  const id = env.METRICS_COLLECTOR.idFromName("metrics-collector")
+  const stub = env.METRICS_COLLECTOR.get(id)
 
-// Handle /metrics endpoint
-const handleMetrics = (env: Env): Promise<Response> => {
-  const program = Effect.gen(function* () {
-    const collector = yield* MetricsCollector
-    return yield* collector.collect()
-  })
-
-  const runnable = program.pipe(Effect.provide(makeAppLayer(env)))
-
-  return Effect.runPromiseExit(runnable).then((exit) => {
-    if (Exit.isSuccess(exit)) {
-      return new Response(exit.value, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/plain; version=0.0.4; charset=utf-8",
-        },
-      })
-    } else {
-      const error = exit.cause
-      console.error("Failed to collect metrics:", error)
-      return new Response(`Error collecting metrics: ${String(error)}`, {
-        status: 500,
-        headers: { "Content-Type": "text/plain" },
-      })
-    }
-  })
+  try {
+    return await stub.fetch(new Request("http://do/metrics"))
+  } catch (error) {
+    console.error("Failed to fetch metrics from DO:", error)
+    return new Response(`Error collecting metrics: ${String(error)}`, {
+      status: 500,
+      headers: { "Content-Type": "text/plain" },
+    })
+  }
 }
 
 // Handle /health endpoint
