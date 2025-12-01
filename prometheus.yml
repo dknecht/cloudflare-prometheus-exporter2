@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 120s  # The interval to scrape targets (15 seconds in this case)
+
+scrape_configs:
+  - job_name: 'cloudflare_metrics'  # Custom name for the job
+    static_configs:
+      - targets: ['localhost:8080']  
