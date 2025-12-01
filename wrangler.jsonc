@@ -1,5 +1,5 @@
 {
-  "name": "cloudflare-prometheus-exporter",
+  "name": "cloudflare-prometheus-exporter2",
   "main": "src/index.ts",
   "compatibility_date": "2024-11-01",
   "vars": {
