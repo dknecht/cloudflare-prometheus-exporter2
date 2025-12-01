@@ -19,6 +19,8 @@ export class ExporterConfig extends Context.Tag("ExporterConfig")<
     readonly metricsDenylist: ReadonlySet<string>
     readonly zones: readonly string[]
     readonly excludeZones: readonly string[]
+    readonly metricsPath: string
+    readonly sslConcurrency: number
   }
 >() {}
 
@@ -44,6 +46,8 @@ const config = Config.all({
     Config.withDefault(""),
     Config.map((s) => s.split(",").map((z) => z.trim()).filter((z) => z.length > 0))
   ),
+  metricsPath: Config.string("METRICS_PATH").pipe(Config.withDefault("/metrics")),
+  sslConcurrency: Config.integer("SSL_CONCURRENCY").pipe(Config.withDefault(5)),
 })
 
 export const ExporterConfigLive = Layer.effect(
@@ -63,6 +67,8 @@ export const ExporterConfigLive = Layer.effect(
       metricsDenylist: cfg.metricsDenylist,
       zones: cfg.zones,
       excludeZones: cfg.excludeZones,
+      metricsPath: cfg.metricsPath,
+      sslConcurrency: cfg.sslConcurrency,
     }
   })
 )
@@ -86,4 +92,6 @@ export const makeConfigFromEnv = (env: Record<string, string | undefined>) =>
     ),
     zones: (env["CF_ZONES"] ?? "").split(",").map((z) => z.trim()).filter((z) => z.length > 0),
     excludeZones: (env["CF_EXCLUDE_ZONES"] ?? "").split(",").map((z) => z.trim()).filter((z) => z.length > 0),
+    metricsPath: env["METRICS_PATH"] ?? "/metrics",
+    sslConcurrency: parseInt(env["SSL_CONCURRENCY"] ?? "5", 10),
   })

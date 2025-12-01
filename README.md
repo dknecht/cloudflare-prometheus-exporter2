@@ -53,7 +53,7 @@ Click the deploy button above to deploy directly to Cloudflare Workers. You'll n
 | `CF_API_TOKEN` | Cloudflare API Token (recommended) | - |
 | `CF_API_KEY` | Cloudflare API Key (legacy) | - |
 | `CF_API_EMAIL` | Cloudflare API Email (required with API Key) | - |
-| `SCRAPE_DELAY` | Delay in seconds before fetching metrics | `60` |
+| `SCRAPE_DELAY` | Delay in seconds before fetching metrics | `300` |
 | `CF_QUERY_LIMIT` | Maximum results per GraphQL query | `1000` |
 | `CF_BATCH_SIZE` | Number of zones to process per batch | `10` |
 | `FREE_TIER` | Only collect free tier metrics | `false` |
@@ -62,6 +62,8 @@ Click the deploy button above to deploy directly to Cloudflare Workers. You'll n
 | `METRICS_DENYLIST` | Comma-separated list of metrics to exclude | - |
 | `CF_ZONES` | Comma-separated list of zone IDs to include | - |
 | `CF_EXCLUDE_ZONES` | Comma-separated list of zone IDs to exclude | - |
+| `METRICS_PATH` | Custom path for metrics endpoint | `/metrics` |
+| `SSL_CONCURRENCY` | Concurrent SSL certificate fetches | `5` |
 
 ### Setting Secrets
 
@@ -124,6 +126,9 @@ Create an API token with the following permissions:
 - `cloudflare_zone_colocation_visits` - Visits per colocation
 - `cloudflare_zone_colocation_edge_response_bytes` - Edge response bytes per colocation
 - `cloudflare_zone_colocation_requests_total` - Requests per colocation
+- `cloudflare_zone_colocation_visits_error` - Visits per colocation with error status codes
+- `cloudflare_zone_colocation_edge_response_bytes_error` - Edge response bytes per colocation with errors
+- `cloudflare_zone_colocation_requests_total_error` - Requests per colocation with errors
 
 ### Error Rate Metrics
 - `cloudflare_zone_customer_error_4xx_rate` - 4xx error rate

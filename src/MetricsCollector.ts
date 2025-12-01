@@ -359,6 +359,36 @@ export const MetricsCollectorLive = Layer.effect(
         }
       }).pipe(Effect.catchAll(() => Effect.void))
 
+    // Collect colocation error metrics (4xx/5xx)
+    const collectColoErrorMetrics = (
+      zoneIDs: readonly string[],
+      zones: readonly Zone[]
+    ) =>
+      Effect.gen(function* () {
+        const data = yield* client.fetchColoErrorMetrics(zoneIDs)
+
+        for (const zone of data.viewer.zones) {
+          const info = findZoneInfo(zones, zone.zoneTag)
+          if (!info) continue
+
+          for (const group of zone.httpRequestsAdaptiveGroups) {
+            const labels = getLabels(
+              {
+                zone: info.name,
+                account: info.account,
+                colocation: group.dimensions.coloCode,
+                status: String(group.dimensions.edgeResponseStatus),
+              },
+              group.dimensions.clientRequestHTTPHost
+            )
+
+            yield* registry.counter(METRICS.ZONE_COLOCATION_VISITS_ERROR.name, METRICS.ZONE_COLOCATION_VISITS_ERROR.help, labels, group.sum.visits)
+            yield* registry.counter(METRICS.ZONE_COLOCATION_EDGE_RESPONSE_BYTES_ERROR.name, METRICS.ZONE_COLOCATION_EDGE_RESPONSE_BYTES_ERROR.help, labels, group.sum.edgeResponseBytes)
+            yield* registry.counter(METRICS.ZONE_COLOCATION_REQUESTS_TOTAL_ERROR.name, METRICS.ZONE_COLOCATION_REQUESTS_TOTAL_ERROR.help, labels, group.count)
+          }
+        }
+      }).pipe(Effect.catchAll(() => Effect.void))
+
     // Collect worker metrics
     const collectWorkerMetrics = (account: Account) =>
       Effect.gen(function* () {
@@ -502,38 +532,46 @@ export const MetricsCollectorLive = Layer.effect(
         yield* registry.gauge(METRICS.MAGIC_TRANSIT_EDGE_COLO_COUNT.name, METRICS.MAGIC_TRANSIT_EDGE_COLO_COUNT.help, labels, edgeColoCount)
       }).pipe(Effect.catchAll(() => Effect.void))
 
-    // Collect SSL certificate metrics
+    // Collect SSL certificate metrics with concurrent fetching
     const collectSSLMetrics = (
       zoneIDs: readonly string[],
       zones: readonly Zone[]
     ) =>
       Effect.gen(function* () {
-        for (const zoneID of zoneIDs) {
-          const zone = zones.find((z) => z.id === zoneID)
-          if (!zone) continue
+        // Fetch certificates concurrently with configurable concurrency
+        const fetchCertsForZone = (zoneID: string) =>
+          Effect.gen(function* () {
+            const zone = zones.find((z) => z.id === zoneID)
+            if (!zone) return
 
-          const certs = yield* client.fetchSSLCertificates(zoneID).pipe(Effect.catchAll(() => Effect.succeed([])))
+            const certs = yield* client.fetchSSLCertificates(zoneID).pipe(Effect.catchAll(() => Effect.succeed([])))
 
-          for (const cert of certs) {
-            const zoneName = cert.hosts[0]?.startsWith("*.")
-              ? cert.hosts[1] ?? cert.hosts[0] ?? "unknown"
-              : cert.hosts[0] ?? "unknown"
+            for (const cert of certs) {
+              const zoneName = cert.hosts[0]?.startsWith("*.")
+                ? cert.hosts[1] ?? cert.hosts[0] ?? "unknown"
+                : cert.hosts[0] ?? "unknown"
 
-            const expiresOn = new Date(cert.expires_on).getTime() / 1000
+              const expiresOn = new Date(cert.expires_on).getTime() / 1000
 
-            yield* registry.gauge(
-              METRICS.ZONE_CERTIFICATE_VALIDATION_STATUS.name,
-              METRICS.ZONE_CERTIFICATE_VALIDATION_STATUS.help,
-              {
-                zone_id: zoneID,
-                zone_name: zoneName,
-                status: cert.status,
-                issuer: cert.issuer,
-              },
-              expiresOn
-            )
-          }
-        }
+              yield* registry.gauge(
+                METRICS.ZONE_CERTIFICATE_VALIDATION_STATUS.name,
+                METRICS.ZONE_CERTIFICATE_VALIDATION_STATUS.help,
+                {
+                  zone_id: zoneID,
+                  zone_name: zoneName,
+                  status: cert.status,
+                  issuer: cert.issuer,
+                },
+                expiresOn
+              )
+            }
+          })
+
+        // Process all zones with concurrent limit
+        yield* Effect.all(
+          zoneIDs.map(fetchCertsForZone),
+          { concurrency: config.sslConcurrency }
+        )
       }).pipe(Effect.catchAll(() => Effect.void))
 
     // Collect request method metrics
@@ -606,6 +644,7 @@ export const MetricsCollectorLive = Layer.effect(
               if (!config.freeTier) {
                 yield* Effect.all([
                   collectColoMetrics(batchIDs, nonFreeZones),
+                  collectColoErrorMetrics(batchIDs, nonFreeZones),
                   collectLoadBalancerMetrics(batchIDs, nonFreeZones),
                   collectLogpushZoneMetrics(batchIDs),
                   collectSSLMetrics(batchIDs, nonFreeZones),

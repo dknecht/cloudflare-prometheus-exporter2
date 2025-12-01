@@ -2,11 +2,12 @@
  * Cloudflare API Client Service
  * Uses Effect for type-safe error handling and composition
  */
-import { Context, Data, Effect, Layer } from "effect"
+import { Context, Data, Effect, Layer, Schedule, Ref } from "effect"
 import type {
   AdaptiveGroupsResponse,
   ColoGroupsResponse,
   FirewallGroupsResponse,
+  FirewallRulesResponse,
   GraphQLResponse,
   HealthCheckGroupsResponse,
   HTTPEdgeCountryResponse,
@@ -21,15 +22,22 @@ import type {
   WorkerTotalsResponse,
   Zone,
   Account,
+  ColoErrorGroupsResponse,
 } from "./Types"
 import { ExporterConfig } from "./Config"
 
 const CF_GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql/"
 
+// Rate limit: 1200 requests per 5 minutes = 4 requests per second
+// We use 3 RPS to be safe with burst handling
+const RATE_LIMIT_RPS = 3
+const RATE_LIMIT_INTERVAL_MS = 1000 / RATE_LIMIT_RPS
+
 // Error types
 export class CloudflareApiError extends Data.TaggedError("CloudflareApiError")<{
   readonly message: string
   readonly statusCode?: number
+  readonly retryable?: boolean
 }> {}
 
 export class GraphQLError extends Data.TaggedError("GraphQLError")<{
@@ -38,6 +46,10 @@ export class GraphQLError extends Data.TaggedError("GraphQLError")<{
 
 export class AuthenticationError extends Data.TaggedError("AuthenticationError")<{
   readonly message: string
+}> {}
+
+export class RateLimitError extends Data.TaggedError("RateLimitError")<{
+  readonly retryAfter?: number
 }> {}
 
 // Service interface
@@ -52,6 +64,9 @@ export class CloudflareClient extends Context.Tag("CloudflareClient")<
     readonly fetchFirewallMetrics: (
       zoneIDs: readonly string[]
     ) => Effect.Effect<FirewallGroupsResponse, CloudflareApiError | GraphQLError>
+    readonly fetchFirewallRules: (
+      zoneID: string
+    ) => Effect.Effect<FirewallRulesResponse, CloudflareApiError>
     readonly fetchHealthCheckMetrics: (
       zoneIDs: readonly string[]
     ) => Effect.Effect<HealthCheckGroupsResponse, CloudflareApiError | GraphQLError>
@@ -64,6 +79,9 @@ export class CloudflareClient extends Context.Tag("CloudflareClient")<
     readonly fetchColoMetrics: (
       zoneIDs: readonly string[]
     ) => Effect.Effect<ColoGroupsResponse, CloudflareApiError | GraphQLError>
+    readonly fetchColoErrorMetrics: (
+      zoneIDs: readonly string[]
+    ) => Effect.Effect<ColoErrorGroupsResponse, CloudflareApiError | GraphQLError>
     readonly fetchWorkerTotals: (
       accountID: string
     ) => Effect.Effect<WorkerTotalsResponse, CloudflareApiError | GraphQLError>
@@ -88,11 +106,42 @@ export class CloudflareClient extends Context.Tag("CloudflareClient")<
   }
 >() {}
 
+// Retry schedule: exponential backoff with max 3 retries
+const retrySchedule = Schedule.exponential("100 millis").pipe(
+  Schedule.intersect(Schedule.recurs(3)),
+  Schedule.jittered
+)
+
+// Check if error is retryable
+const isRetryable = (error: CloudflareApiError | GraphQLError): boolean => {
+  if (error instanceof GraphQLError) return false
+  if (error.statusCode === 429) return true // Rate limited
+  if (error.statusCode && error.statusCode >= 500) return true // Server errors
+  return error.retryable ?? false
+}
+
 // Implementation
 export const CloudflareClientLive = Layer.effect(
   CloudflareClient,
   Effect.gen(function* () {
     const config = yield* ExporterConfig
+
+    // Rate limiter state: track last request time
+    const lastRequestTime = yield* Ref.make(0)
+
+    // Rate limit helper - ensures minimum interval between requests
+    const rateLimit = Effect.gen(function* () {
+      const now = Date.now()
+      const last = yield* Ref.get(lastRequestTime)
+      const elapsed = now - last
+      const waitTime = Math.max(0, RATE_LIMIT_INTERVAL_MS - elapsed)
+
+      if (waitTime > 0) {
+        yield* Effect.sleep(`${waitTime} millis`)
+      }
+
+      yield* Ref.set(lastRequestTime, Date.now())
+    })
 
     const getAuthHeaders = (): Record<string, string> => {
       if (config.apiToken) {
@@ -122,71 +171,107 @@ export const CloudflareClientLive = Layer.effect(
       query: string,
       variables: Record<string, unknown>
     ): Effect.Effect<T, CloudflareApiError | GraphQLError> =>
-      Effect.tryPromise({
-        try: async () => {
-          const response = await fetch(CF_GRAPHQL_ENDPOINT, {
-            method: "POST",
-            headers: {
-              ...getAuthHeaders(),
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ query, variables }),
-          })
+      Effect.gen(function* () {
+        yield* rateLimit
 
-          if (!response.ok) {
-            throw new CloudflareApiError({
-              message: `GraphQL request failed: ${response.status} ${response.statusText}`,
-              statusCode: response.status,
+        return yield* Effect.tryPromise({
+          try: async () => {
+            const response = await fetch(CF_GRAPHQL_ENDPOINT, {
+              method: "POST",
+              headers: {
+                ...getAuthHeaders(),
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ query, variables }),
             })
-          }
 
-          const result = (await response.json()) as GraphQLResponse<T>
-          if (result.errors && result.errors.length > 0) {
-            throw new GraphQLError({
-              messages: result.errors.map((e) => e.message),
+            if (response.status === 429) {
+              throw new CloudflareApiError({
+                message: "Rate limited by Cloudflare API",
+                statusCode: 429,
+                retryable: true,
+              })
+            }
+
+            if (!response.ok) {
+              throw new CloudflareApiError({
+                message: `GraphQL request failed: ${response.status} ${response.statusText}`,
+                statusCode: response.status,
+                retryable: response.status >= 500,
+              })
+            }
+
+            const result = (await response.json()) as GraphQLResponse<T>
+            if (result.errors && result.errors.length > 0) {
+              throw new GraphQLError({
+                messages: result.errors.map((e) => e.message),
+              })
+            }
+
+            return result.data
+          },
+          catch: (error) => {
+            if (error instanceof CloudflareApiError || error instanceof GraphQLError) {
+              return error
+            }
+            return new CloudflareApiError({
+              message: error instanceof Error ? error.message : String(error),
+              retryable: true, // Network errors are retryable
             })
-          }
-
-          return result.data
-        },
-        catch: (error) => {
-          if (error instanceof CloudflareApiError || error instanceof GraphQLError) {
-            return error
-          }
-          return new CloudflareApiError({
-            message: error instanceof Error ? error.message : String(error),
-          })
-        },
-      })
+          },
+        })
+      }).pipe(
+        Effect.retry(Schedule.recurWhile<CloudflareApiError | GraphQLError>(isRetryable).pipe(
+          Schedule.intersect(retrySchedule)
+        ))
+      )
 
     const restApi = <T>(path: string): Effect.Effect<T, CloudflareApiError> =>
-      Effect.tryPromise({
-        try: async () => {
-          const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-            headers: {
-              ...getAuthHeaders(),
-              "Content-Type": "application/json",
-            },
-          })
+      Effect.gen(function* () {
+        yield* rateLimit
 
-          if (!response.ok) {
-            throw new CloudflareApiError({
-              message: `REST API request failed: ${response.status} ${response.statusText}`,
-              statusCode: response.status,
+        return yield* Effect.tryPromise({
+          try: async () => {
+            const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+              headers: {
+                ...getAuthHeaders(),
+                "Content-Type": "application/json",
+              },
             })
-          }
 
-          return response.json() as Promise<T>
-        },
-        catch: (error) => {
-          if (error instanceof CloudflareApiError) {
-            return error
-          }
-          return new CloudflareApiError({
-            message: error instanceof Error ? error.message : String(error),
-          })
-        },
-      })
+            if (response.status === 429) {
+              throw new CloudflareApiError({
+                message: "Rate limited by Cloudflare API",
+                statusCode: 429,
+                retryable: true,
+              })
+            }
+
+            if (!response.ok) {
+              throw new CloudflareApiError({
+                message: `REST API request failed: ${response.status} ${response.statusText}`,
+                statusCode: response.status,
+                retryable: response.status >= 500,
+              })
+            }
+
+            return response.json() as Promise<T>
+          },
+          catch: (error) => {
+            if (error instanceof CloudflareApiError) {
+              return error
+            }
+            return new CloudflareApiError({
+              message: error instanceof Error ? error.message : String(error),
+              retryable: true,
+            })
+          },
+        })
+      }).pipe(
+        Effect.retry(Schedule.recurWhile<CloudflareApiError>(isRetryable).pipe(
+          Schedule.intersect(retrySchedule)
+        ))
+      )
 
     return {
       fetchZones: () =>
@@ -257,6 +342,25 @@ export const CloudflareClientLive = Layer.effect(
           limit: config.queryLimit,
         })
       },
+
+      fetchFirewallRules: (zoneID) =>
+        Effect.gen(function* () {
+          // Fetch traditional firewall rules
+          const rulesResponse = yield* restApi<FirewallRulesResponse>(
+            `/zones/${zoneID}/firewall/rules`
+          ).pipe(Effect.catchAll(() => Effect.succeed({ result: [] } as FirewallRulesResponse)))
+
+          // Fetch managed rulesets
+          const rulesetsResponse = yield* restApi<{ result: readonly { id: string; name: string; description?: string }[] }>(
+            `/zones/${zoneID}/rulesets`
+          ).pipe(Effect.catchAll(() => Effect.succeed({ result: [] })))
+
+          // Combine into a single response
+          return {
+            result: rulesResponse.result,
+            rulesets: rulesetsResponse.result,
+          } as FirewallRulesResponse
+        }),
 
       fetchHealthCheckMetrics: (zoneIDs) => {
         const { mintime, maxtime } = getTimeRange()
@@ -351,6 +455,7 @@ export const CloudflareClientLive = Layer.effect(
                   filter: { datetime_geq: $mintime, datetime_lt: $maxtime }
                 ) {
                   count
+                  avg { sampleInterval }
                   dimensions { clientRequestHTTPHost coloCode datetime originResponseStatus }
                   sum { edgeResponseBytes visits }
                 }
@@ -359,6 +464,37 @@ export const CloudflareClientLive = Layer.effect(
           }
         `
         return graphql<ColoGroupsResponse>(query, {
+          zoneIDs,
+          mintime,
+          maxtime,
+          limit: config.queryLimit,
+        })
+      },
+
+      fetchColoErrorMetrics: (zoneIDs) => {
+        const { mintime, maxtime } = getTimeRange()
+        const query = `
+          query ($zoneIDs: [String!], $mintime: Time!, $maxtime: Time!, $limit: Int!) {
+            viewer {
+              zones(filter: { zoneTag_in: $zoneIDs }) {
+                zoneTag
+                httpRequestsAdaptiveGroups(
+                  limit: $limit,
+                  filter: {
+                    datetime_geq: $mintime,
+                    datetime_lt: $maxtime,
+                    edgeResponseStatus_geq: 400
+                  }
+                ) {
+                  count
+                  dimensions { clientRequestHTTPHost coloCode edgeResponseStatus }
+                  sum { edgeResponseBytes visits }
+                }
+              }
+            }
+          }
+        `
+        return graphql<ColoErrorGroupsResponse>(query, {
           zoneIDs,
           mintime,
           maxtime,
@@ -404,14 +540,27 @@ export const CloudflareClientLive = Layer.effect(
                   limit: $limit
                 ) {
                   count
-                  dimensions { lbName selectedPoolName selectedOriginName }
+                  dimensions {
+                    lbName
+                    selectedPoolName
+                    selectedOriginName
+                    region
+                    proxied
+                    selectedPoolAvgRttMs
+                    selectedPoolHealthy
+                    steeringPolicy
+                  }
                 }
                 loadBalancingRequestsAdaptive(
                   filter: { datetime_geq: $mintime, datetime_lt: $maxtime },
                   limit: $limit
                 ) {
                   lbName
-                  pools { poolName healthy }
+                  pools {
+                    poolName
+                    healthy
+                    origins { originName healthy originAddress }
+                  }
                 }
               }
             }

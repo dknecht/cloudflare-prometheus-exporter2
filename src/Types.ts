@@ -113,11 +113,28 @@ export interface HTTPEdgeCountryHostGroup {
 // Colo Groups
 export interface ColoGroup {
   readonly count: number
+  readonly avg?: {
+    readonly sampleInterval: number
+  }
   readonly dimensions: {
     readonly datetime: string
     readonly coloCode: string
     readonly clientRequestHTTPHost: string
     readonly originResponseStatus: number
+  }
+  readonly sum: {
+    readonly edgeResponseBytes: number
+    readonly visits: number
+  }
+}
+
+// Colo Error Groups (for error-specific metrics)
+export interface ColoErrorGroup {
+  readonly count: number
+  readonly dimensions: {
+    readonly coloCode: string
+    readonly clientRequestHTTPHost: string
+    readonly edgeResponseStatus: number
   }
   readonly sum: {
     readonly edgeResponseBytes: number
@@ -155,7 +172,18 @@ export interface LoadBalancerGroup {
     readonly lbName: string
     readonly selectedPoolName: string
     readonly selectedOriginName: string
+    readonly region?: string
+    readonly proxied?: number
+    readonly selectedPoolAvgRttMs?: number
+    readonly selectedPoolHealthy?: number
+    readonly steeringPolicy?: string
   }
+}
+
+export interface LoadBalancerOrigin {
+  readonly originName: string
+  readonly healthy: number
+  readonly originAddress: string
 }
 
 export interface LoadBalancerRequest {
@@ -163,7 +191,30 @@ export interface LoadBalancerRequest {
   readonly pools: readonly {
     readonly poolName: string
     readonly healthy: number
+    readonly origins?: readonly LoadBalancerOrigin[]
   }[]
+}
+
+// Firewall Rules
+export interface FirewallRule {
+  readonly id: string
+  readonly description?: string
+  readonly action: string
+  readonly filter: {
+    readonly id: string
+    readonly expression: string
+  }
+}
+
+export interface FirewallRuleset {
+  readonly id: string
+  readonly name: string
+  readonly description?: string
+}
+
+export interface FirewallRulesResponse {
+  readonly result: readonly FirewallRule[]
+  readonly rulesets?: readonly FirewallRuleset[]
 }
 
 // Logpush Health
@@ -256,6 +307,15 @@ export interface ColoGroupsResponse {
     readonly zones: readonly {
       readonly zoneTag: string
       readonly httpRequestsAdaptiveGroups: readonly ColoGroup[]
+    }[]
+  }
+}
+
+export interface ColoErrorGroupsResponse {
+  readonly viewer: {
+    readonly zones: readonly {
+      readonly zoneTag: string
+      readonly httpRequestsAdaptiveGroups: readonly ColoErrorGroup[]
     }[]
   }
 }

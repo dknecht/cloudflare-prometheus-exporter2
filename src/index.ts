@@ -22,6 +22,8 @@ interface Env {
   readonly METRICS_DENYLIST?: string
   readonly CF_ZONES?: string
   readonly CF_EXCLUDE_ZONES?: string
+  readonly METRICS_PATH?: string
+  readonly SSL_CONCURRENCY?: string
 }
 
 // Create the full application layer
@@ -73,7 +75,7 @@ const handleHealth = (): Response =>
   })
 
 // Handle root endpoint
-const handleRoot = (): Response =>
+const handleRoot = (metricsPath: string): Response =>
   new Response(
     `<!DOCTYPE html>
 <html>
@@ -82,7 +84,7 @@ const handleRoot = (): Response =>
   <h1>Cloudflare Prometheus Exporter</h1>
   <p>Built with Effect TypeScript for Cloudflare Workers</p>
   <ul>
-    <li><a href="/metrics">/metrics</a> - Prometheus metrics endpoint</li>
+    <li><a href="${metricsPath}">${metricsPath}</a> - Prometheus metrics endpoint</li>
     <li><a href="/health">/health</a> - Health check endpoint</li>
   </ul>
 </body>
@@ -101,11 +103,12 @@ const handle404 = (): Response =>
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
+    const metricsPath = env.METRICS_PATH ?? "/metrics"
 
     switch (url.pathname) {
       case "/":
-        return handleRoot()
-      case "/metrics":
+        return handleRoot(metricsPath)
+      case metricsPath:
         return handleMetrics(env)
       case "/health":
         return handleHealth()

@@ -54,6 +54,9 @@ export const METRICS = {
   ZONE_COLOCATION_VISITS: { name: "cloudflare_zone_colocation_visits", help: "Visits per colocation" },
   ZONE_COLOCATION_EDGE_RESPONSE_BYTES: { name: "cloudflare_zone_colocation_edge_response_bytes", help: "Edge response bytes per colocation" },
   ZONE_COLOCATION_REQUESTS_TOTAL: { name: "cloudflare_zone_colocation_requests_total", help: "Requests per colocation" },
+  ZONE_COLOCATION_VISITS_ERROR: { name: "cloudflare_zone_colocation_visits_error", help: "Visits per colocation with error status codes (4xx/5xx)" },
+  ZONE_COLOCATION_EDGE_RESPONSE_BYTES_ERROR: { name: "cloudflare_zone_colocation_edge_response_bytes_error", help: "Edge response bytes per colocation with error codes" },
+  ZONE_COLOCATION_REQUESTS_TOTAL_ERROR: { name: "cloudflare_zone_colocation_requests_total_error", help: "Requests per colocation with error codes" },
 
   // Firewall Metrics
   ZONE_FIREWALL_EVENTS_COUNT: { name: "cloudflare_zone_firewall_events_count", help: "Count of firewall events" },
